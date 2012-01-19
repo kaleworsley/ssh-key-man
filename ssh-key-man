@@ -1,0 +1,168 @@
+#!/bin/bash
+
+case `uname` in
+  Linux)
+  HOME_DIR=/home
+  ;;
+  Darwin)
+  HOME_DIR=/Users
+  ;;
+esac
+
+usage() {
+  cat <<EOT
+
+Usage: `basename $0` [ COMMAND ] [ OPTIONS ] [ ARGUMENTS ]
+
+Manage and distribute public keys for authorized_keys files.
+
+COMMANDS
+
+  add-key [user] [name] [key] | [key file]  # Adds a public key to a users list of keys in ~/.ssh/public_keys
+
+  authorize [user] [target]                 # Adds the users keys to the target users authorized_keys
+
+  deauthorize [user] [target]               # Removes the users keys from the target users authorized_keys
+
+  list-keys [user]                          # List a users public keys
+EOT
+}
+
+if [ "$#" == "0" ] ; then
+  usage ;
+  exit 1 ;
+fi
+
+
+add_key() {
+  public_keys="$HOME_DIR/$user/.ssh/public_keys"
+  touch $public_keys
+
+  if [ -f "$key" ] ; then
+    key=`cat $key`
+  fi
+
+  wc=`echo $key | wc -l`
+
+  if [ `echo $wc` != "1" ] ; then
+    echo "Invalid key: should be one line."
+    exit 1
+  fi
+
+  kc=`grep -c "$key" $public_keys`
+
+  if [ "$kc" == "0" ] ; then
+    echo "$name: $key" >> $public_keys
+  else
+    echo "Key already exists."
+    exit 0
+  fi
+
+}
+
+authorize() {
+  public_keys="$HOME_DIR/$user/.ssh/public_keys"
+  target_home="$HOME_DIR/$target"
+  authorized_keys="$target_home/.ssh/authorized_keys"
+
+  if [ -d $target_home ] ; then
+
+    if [ ! -f $authorized_keys ] ; then
+
+      if [ ! -d `dirname $authorized_keys` ] ; then
+        mkdir `dirname $authorized_keys`
+        chown $target:$target `dirname $authorized_keys`
+      fi
+
+      touch $authorized_keys
+      chown $target:$target $authorized_keys
+    fi
+
+    if [ -f $public_keys ] ; then
+      while read LINE ; do
+        key=`echo $LINE | cut -d ':' -f 2`
+        key="`echo $key`"
+        kc=`grep -c "$key" $authorized_keys`
+
+        if [ "$kc" == "0" ] ; then
+          echo "$key" >> $authorized_keys
+        fi
+
+      done < $public_keys
+
+    fi
+
+    chown $target:$target $authorized_keys
+
+  else
+    echo "Could not find user '$target' ($target_home)"
+  fi
+}
+
+deauthorize() {
+  public_keys="$HOME_DIR/$user/.ssh/public_keys"
+  target_home="$HOME_DIR/$target"
+  authorized_keys="$target_home/.ssh/authorized_keys"
+  if [ ! -f $authorized_keys ] ; then
+    echo "No authorized keys file for $target ($authorized_keys)"
+    exit
+  fi
+  out=`cat $authorized_keys`
+  if [ -f $public_keys ] ; then
+    while read LINE ; do
+      key=`echo $LINE | cut -d ':' -f 2`
+      key="`echo $key`"
+
+      echo sed -n "/$key/!p" $authorized_keys
+      echo ""
+    done < $public_keys
+
+   # echo $out
+  fi
+}
+
+list_keys() {
+  public_keys="$HOME_DIR/$user/.ssh/public_keys"
+
+  if [ -f $public_keys ] ; then
+    while read LINE ; do
+      name=`echo $LINE | cut -d ':' -f 1`
+      key=`echo $LINE | cut -d ':' -f 2`
+      echo "$name"
+      echo "    $key"
+      echo ""
+    done < $public_keys
+  else
+    echo "No public keys file for $user ($public_keys)"
+  fi
+}
+
+case "$1" in
+  add-key)
+    user=$2
+    name=$3
+    key=$4
+    add_key ;;
+
+  authorize)
+    user=$2
+    target=$3
+    authorize ;;
+
+  deauthorize)
+    user=$2
+    target=$3
+    deauthorize ;;
+
+  list-keys)
+    user=$2
+    list_keys ;;
+
+  help)
+    usage ; exit 0 ;;
+
+  *)
+    usage ; exit 1 ;;
+esac
+
+
